@@ -4,24 +4,64 @@
 [![npm](https://img.shields.io/npm/v/agent-proof-kit.svg)](https://www.npmjs.com/package/agent-proof-kit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Deterministic release gates and raw-byte write receipts for AI agents. The kit
-validates a public agent-run contract, evaluates safety and provenance
-invariants, scans the repository surface, exports SARIF, produces proof bundles,
-and mediates narrowly declared file edits through ByteFence.
+**Your coding agent says it changed one line. Agent Proof Kit makes sure that is
+all it changed in the files you protect, and leaves a receipt that proves it.**
 
-The evaluation path is intentionally narrow: no provider account, API key or
-model call, and no network access after installation. Installation itself may
-fetch lockfile-pinned dependencies. ByteFence reads local project bytes, but
-its public receipt omits source fragments and prompts.
+![Claude Code is blocked from editing a protected file directly, then changes it through ByteFence and the receipt verifies](.github/assets/demo.gif)
 
-Maturity: ByteFence ships in v0.5.0 and is backed by deterministic local and CI
-tests. The workflow badge is the live source for matrix status. The project is
-tested against synthetic fixtures and is not presented as production-proven.
+<sub>Real Claude Code run on macOS, terminal output condensed from `--output-format stream-json`.
+What was run and observed: [docs/evidence/claude-code-guard.md](docs/evidence/claude-code-guard.md).</sub>
+
+```bash
+npx agent-proof-kit init --agent claude --protect "src/config.js,.github/workflows/**"
+# --agent codex or --agent all for Codex CLI
+```
+
+## What you get
+
+- **A guard in front of the agent.** A `PreToolUse` hook blocks direct writes to
+  the paths you protect: `Edit`/`Write`, Codex `apply_patch`, and shell commands
+  such as `sed -i` or `>` that name a protected path. It also protects its own
+  configuration, so the agent cannot switch it off.
+- **One sanctioned way to change those files.** The agent writes an
+  `exactReplace` intent and calls `bytefence_apply` over MCP. ByteFence derives
+  the only authorized bytes from the current file and refuses anything else:
+  silent line-ending rewrites, BOM loss, Unicode normalization, truncation,
+  whole-file rewrites.
+- **A receipt for every change.** Each edit leaves an in-toto-shaped receipt that
+  anyone can re-check with `agent-proof bytefence-verify`.
+- **A CI gate.** `agent-proof export --from codex-exec-jsonl` with the strict
+  policy fails a Codex run that patched a file directly.
+
+## What it is not
+
+It is not a sandbox or a permission system. It does not stop an agent from
+running arbitrary commands or dropping a database, and shell detection is
+best-effort. Its job is narrower: changes to the files you care about are exact,
+mediated and provable.
+
+| Surface | Status |
+| --- | --- |
+| Claude Code guard + ByteFence MCP | Verified end-to-end with a live Claude Code run ([evidence](docs/evidence/claude-code-guard.md)) |
+| Codex CLI MCP + trace gate | Config accepted by Codex CLI 0.153.4, MCP handshake verified ([guide](docs/integrations/codex.md)) |
+| Codex CLI guard hook | Generated from the Codex hooks reference; live model run pending |
+
+## The rest of the kit
+
+Beyond edits, the kit validates a public agent-run contract, evaluates safety
+and provenance invariants, scans the repository surface, exports SARIF and
+produces proof bundles. The evaluation path needs no provider account, API key,
+model call or network access after installation. ByteFence reads local project
+bytes, but its public receipt omits source fragments and prompts.
+
+Maturity: backed by deterministic local and CI tests on synthetic fixtures; not
+presented as production-proven. The workflow badge is the live source for
+matrix status.
 
 ## Install
 
 ```bash
-npm install -g agent-proof-kit          # provides `agent-proof` and `agent-proof-mcp`
+npm install -g agent-proof-kit          # provides `agent-proof`, `agent-proof-kit` and `agent-proof-mcp`
 # or run without installing:
 npx --yes --package agent-proof-kit agent-proof verify --input examples/synthetic-agent-run.json --policy policies/default-policy.json
 ```
@@ -161,7 +201,7 @@ Machine-readable artifacts:
 ## GitHub Action
 
 ```yaml
-- uses: guillaumevele/agent-proof-kit@v0.5.0
+- uses: guillaumevele/agent-proof-kit@v0.7.0
   with:
     input: examples/synthetic-agent-run.json
     policy: policies/default-policy.json
@@ -201,8 +241,37 @@ destructive, non-idempotent and never retries an uncertain state. See
 [docs/integrations/mcp.md](docs/integrations/mcp.md).
 
 The `npx` configuration above resolves the latest published package. Replace
-`agent-proof-kit` with `agent-proof-kit@0.5.0` when an immutable MCP dependency
+`agent-proof-kit` with `agent-proof-kit@0.7.0` when an immutable MCP dependency
 version is required.
+
+## Codex CLI
+
+Codex can route edits to protected files through ByteFence, and CI can gate the
+resulting `codex exec --json` trace:
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.agent_proof_kit]
+command = "npx"
+args = ["--yes", "--package", "agent-proof-kit@0.7.0", "agent-proof-mcp"]
+required = true
+enabled_tools = ["agent_proof_status", "bytefence_check", "bytefence_apply"]
+
+[mcp_servers.agent_proof_kit.env]
+AGENT_PROOF_ROOT = "/absolute/path/to/repository"
+```
+
+```bash
+codex exec --json "..." < /dev/null > codex-exec.jsonl
+agent-proof export --from codex-exec-jsonl --input codex-exec.jsonl --out codex-run.json
+agent-proof verify --input codex-run.json --policy policies/codex-bytefence-strict-policy.json
+```
+
+The strict policy fails any run where Codex reports a direct `file_change`
+instead of calling `bytefence_apply`. Start with the [Codex CLI integration guide](docs/integrations/codex.md),
+the copy-paste [AGENTS.md protocol](examples/codex/AGENTS.md) and the
+[end-to-end demo](examples/codex/run-demo.sh). The guide lists what is verified
+and what is not.
 
 ## Policy Surface
 
@@ -277,7 +346,7 @@ schemas/                           public JSON contracts
 src/core/evaluate-agent-run.js     deterministic policy engine
 src/core/diff-agent-runs.js        baseline/candidate regression diff
 src/core/normalize-jsonl.js        synthetic JSONL trace adapter
-src/core/trace-export.js           LangGraph, CrewAI, AutoGen and JSONL fixture export
+src/core/trace-export.js           LangGraph, CrewAI, AutoGen, Codex exec and JSONL trace export
 src/core/policy-loader.js          JSON/YAML policy loader and DSL compiler
 src/core/proof-signature.js        canonical proof-bundle digest and signature helpers
 src/core/public-safety-scan.js     repository surface scanner
@@ -288,6 +357,7 @@ src/report/                        Markdown, SARIF, proof-bundle and dashboard r
 examples/bytefence/                deterministic adversarial raw-byte corpus
 adapters/vibe/                     version-pinned Mistral Vibe 2.19.1 profile
 examples/adapters/                 synthetic framework trace shapes
+examples/codex/                    Codex CLI config, AGENTS.md protocol and end-to-end demo
 policies/                          JSON policy gates
 tests/                             unit, CLI, MCP, schema, adapter, diff, SARIF, signature, dashboard and pack tests
 docs/generated/                    reproducible proof artifacts
@@ -295,6 +365,7 @@ docs/threat-model.md               public threat model and release rule
 docs/signatures.md                 proof bundle digest and signature workflow
 docs/dashboard.md                  local HTML dashboard workflow
 docs/integrations/bytefence.md     ByteFence quickstart, guarantees and evidence
+docs/integrations/codex.md         Codex CLI MCP setup and exec trace gating
 ```
 
 ## ByteFence 0.5.0
@@ -311,6 +382,9 @@ current remote matrix.
 
 ## Roadmap
 
+- A recorded, model-driven Codex demo run checked in as evidence.
+- Protected-path coverage check: every `git diff` change to a protected path
+  must match a ByteFence receipt.
 - OpenTelemetry-shaped trace adapter.
 - GitHub pull-request comment, status badge and required-check examples.
 - Policy comparator and shared fixture registry.

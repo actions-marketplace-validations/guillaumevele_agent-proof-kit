@@ -8,6 +8,71 @@ and published releases follow semantic versioning.
 
 No unreleased changes.
 
+## [0.7.0] - 2026-09-16
+
+### Added
+
+- Added `agent-proof init --agent codex|claude|all --protect <patterns>`. It
+  writes or merges the protected-path list, the ByteFence policy and folders,
+  the edit protocol in `AGENTS.md`/`CLAUDE.md`, the project MCP server
+  (`.codex/config.toml`, `.mcp.json`) and a `PreToolUse` guard hook
+  (`.codex/hooks.json`, `.claude/settings.json`). It is idempotent, keeps
+  existing settings and supports `--dry-run` and `--force`.
+- Added `agent-proof guard`, a `PreToolUse` hook for Claude Code and Codex CLI.
+  It blocks direct writes to protected paths from `Edit`, `Write`,
+  `MultiEdit`, `NotebookEdit`, Codex `apply_patch` (patch headers, resolved from
+  the hook `cwd`), write-capable shell commands that name a protected path, and
+  write-like MCP tools. It always protects its own configuration and ByteFence
+  receipts, fails closed on invalid configuration or unparseable input, and is a
+  no-op in workspaces without `.agent-proof/protected.json`.
+- In an initialized workspace, `bytefence_apply` refuses intents that target
+  guard control files and requires `policy_path: ".bytefence/policy.json"`.
+- The MCP server finds the initialized workspace root from a subdirectory when
+  `AGENT_PROOF_ROOT` is not set.
+- Added the `agent-proof-kit` bin alias so `npx agent-proof-kit init` works.
+- Added the Agent Guard guide, a recorded Claude Code evidence note and a demo
+  GIF built from that run.
+
+### Changed
+
+- Rewrote the top of the README around the guard, the mediated edit path and
+  what the kit does not do.
+- `agent-proof --version` and `agent-proof version` print the package version
+  (#19, thanks @Akzrozen).
+
+## [0.6.0] - 2026-09-16
+
+### Added
+
+- Added the `codex-exec-jsonl` trace source for `agent-proof export` and the
+  `agent_proof_export_trace` MCP tool. It normalizes the `codex exec --json`
+  event stream (Codex CLI 0.153 schema) into a non-synthetic agent run: shell
+  commands, direct file changes, MCP tool calls, web searches, collaboration
+  calls, agent messages and turn usage or failures. Reasoning text, command
+  output, MCP arguments and search queries are not exported.
+- `bytefence_apply` calls in a Codex trace become mediated `write` actions that
+  count as completed only for `status: "allow"`, `exitCode: 0` and a persisted
+  receipt; refused applies become `blocked`. Direct Codex patches become
+  `unmediated_write`, deletions `destructive`, and unrecognized item types fail
+  closed.
+- Added `policies/codex-exec-policy.json` and
+  `policies/codex-bytefence-strict-policy.json`; the strict policy fails any run
+  with a direct `file_change`.
+- Added the Codex CLI integration guide, a `config.toml` example checked with
+  `codex exec --strict-config`, a copy-paste `AGENTS.md` ByteFence edit protocol
+  and `examples/codex/run-demo.sh`, which verifies target bytes, the receipt and
+  the exported trace after a Codex run.
+- Added tests that drive real `bytefence_apply` MCP results through the Codex
+  adapter, plus edge cases for declined, failed, deleted, incomplete and
+  unrecognized items.
+- Added a code of conduct, CODEOWNERS and an issue-template chooser that routes
+  vulnerabilities to private reporting.
+
+### Changed
+
+- Bumped `@modelcontextprotocol/sdk` to 1.30.0, `zod` to 4.5.4 and the pinned
+  `actions/checkout`, `actions/setup-node` and `actions/setup-python` versions.
+
 ## [0.5.0] - 2026-07-13
 
 ### Added
@@ -134,7 +199,9 @@ No unreleased changes.
 
 - Established the initial public Agent Proof Kit repository and CI baseline.
 
-[Unreleased]: https://github.com/guillaumevele/agent-proof-kit/compare/v0.5.0...main
+[Unreleased]: https://github.com/guillaumevele/agent-proof-kit/compare/v0.7.0...main
+[0.7.0]: https://github.com/guillaumevele/agent-proof-kit/releases/tag/v0.7.0
+[0.6.0]: https://github.com/guillaumevele/agent-proof-kit/releases/tag/v0.6.0
 [0.5.0]: https://github.com/guillaumevele/agent-proof-kit/releases/tag/v0.5.0
 [0.4.1]: https://github.com/guillaumevele/agent-proof-kit/releases/tag/v0.4.1
 [0.4.0]: https://github.com/guillaumevele/agent-proof-kit/releases/tag/v0.4.0
